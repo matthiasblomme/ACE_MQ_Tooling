@@ -275,7 +275,7 @@ function Update-ODBC {
 
     Process{
         Try{
-            $output = & odbcconf CONFIGSYSDSN "IBM App Connect Enterprise $fixVersion - DataDirect Technologies 64-BIT Oracle Wire Protocol" "DSN=$driverName"
+            $output = & odbcconf CONFIGSYSDSN "IBM App Connect Enterprise $fixVersion - Oracle Wire Protocol (DataDirect)" "DSN=$driverName"
             Write-Log $output
         }
 
@@ -440,6 +440,81 @@ function Stop-Ace {
             Write-Log "Stopping $nodeName succesfull."
         } else {
             Write-Log "Stopping $nodeName failed."
+        }
+    }
+}
+
+function Set-Mqsimode {
+    <#
+    .SYNOPSIS
+        Set the mode for the updated installation
+
+    .DESCRIPTION
+        Set-Mqsimode is a function that sets the mqsimode flag for the new installation, choose from
+        advanced nonproduction standard nonproductionfree
+
+    .PARAMETER oldVersion
+        The version of the current mod release where the node is running on
+
+    .PARAMETER installBasePath
+        The path to the ACE runtimes (without the version), the default windows installation path is C:\Program Files\IBM\ACE\
+
+    .PARAMETER nodeName
+        The name of the integration node to stop
+
+    .NOTES
+        Version:        1.0
+        Author:         Matthias Blomme
+        Creation Date:  2022-12-29
+        Purpose/Change: Initial script development
+
+    .EXAMPLE
+        Stop-Ace -fixVersion 12.0.5.0 -installBasePath "C:\Program Files\IBM\ACE\" -nodeName TestNode
+    #>
+
+
+    param(
+        [Parameter(Mandatory=$True)][String]$fixVersion,
+        [Parameter(Mandatory=$True)][String]$mode
+    )
+
+    Begin{
+        Write-Log "Set mode for installation $fixVersion to $mode..."
+        $installDir = "$installBasePath\$fixVersion"
+        $pwd = [string](Get-Location)
+        $setModeScriptPath =  "$pwd\setMode.bat"
+    }
+
+    Process{
+        Try{
+            Write-Log "Creating temporary file $setModeScriptPath"
+            $null = New-Item -Path $setModeScriptPath -Force
+            Add-Content -Path $setModeScriptPath -value "call `"$installDir\server\bin\mqsiprofile.cmd`""
+            Add-Content -Path $setModeScriptPath -value "call `"ibmint`" set mode $mode"
+            $output = & $setModeScriptPath
+
+            Remove-Item -Path $setModeScriptPath -Force
+
+            $selection = $output | Select-String "BIP1805I"
+            if ($selection -like "*BIP1805I*") {
+                Write-Log "mode $mode set."
+            } else {
+                Write-Log "Failed to set mode $mode, please check."
+                exit 1
+            }
+        }
+
+        Catch{
+            Write-Log "An exception occured trying to set mode to $mode"
+            Break
+        }
+    }
+
+    End{
+        If($?){
+            Write-Log "set $mode succesfull."
+        } else {
+            Write-Log "set $mode failed."
         }
     }
 }
@@ -717,14 +792,14 @@ function Install-ModRelease {
     Begin{
         $aceExe = "ACESetup$fixVersion.exe"
         $logFile = "$logBasePath\Ace_intall_$fixVersion.log"
-        $aceInstallCommand = $aceExe + " /install /quiet LICENSE_ACCEPTED=TRUE InstallFolder=`"" + $installDir + "`" /log " + $logFile
+        $aceInstallCommand = $aceExe + " -silent -installToolkit yes -licenseAccept yes -anonymousUsageStatistics no -installFolder `"" + $installDir + "`" -log " + $logFile
         Write-Log "Begin install of $fixVersion ..."
         Write-Log "(this may take some time) ..."
     }
 
     Process{
         Try{
-            $serviceName = "AppConnectEnterpriseMasterService$fixVersion"
+            $serviceName = "AppConnectEnterpriseParentService$fixVersion"
             $service = Check-Service -serviceName $serviceName
             if($service.Length -gt 0)
             {
@@ -1036,7 +1111,7 @@ function Check-AceInstall {
 
     Process{
         Try{
-            $serviceName = "AppConnectEnterpriseMasterService$fixVersion"
+            $serviceName = "AppConnectEnterpriseParentService$fixVersion"
             $service = Check-Service -serviceName $serviceName
             if($service.Length -gt 0)
             {
@@ -1119,7 +1194,7 @@ function Check-MqsiService {
 
     Process{
         Try{
-            $serviceName = "AppConnectEnterpriseMasterService$fixVersion"
+            $serviceName = "AppConnectEnterpriseParentService$fixVersion"
             $service = Check-Service -serviceName $serviceName
             if($service.Length -gt 0)
             {
@@ -1369,12 +1444,13 @@ function Check-httpHealth {
     #>
 
     param (
-        [Parameter(Mandatory=$True, Position=0)][String]$hostName
+        [Parameter(Mandatory=$True, Position=0)][String]$hostName,
+        [Parameter(Mandatory=$True, Position=1)][String]$port
     )
     Begin{}
 
     Process{
-        $url = "https://" + $hostName + ":7093/httplistener/health"
+        $url = "https://" + $hostName + ":" + $port + "/httplistener/health"
         $httpResult = Invoke-RestMethod -Method 'Get' -Uri $url
 
         if ($httpResult.status -eq 'ok')
@@ -1390,6 +1466,67 @@ function Check-httpHealth {
 
 }
 
+function Check-httpsHealth {
+    <#
+    .SYNOPSIS
+        HTTPS Health Check
+
+    .DESCRIPTION
+        Check-httpsHealth performs an HTTPS health check against the ACE httplistener endpoint.
+        Certificate validation is bypassed (TrustAllCertsPolicy) and TLS 1.0/1.1/1.2 are enabled
+        to support older ACE environments.
+
+    .PARAMETER hostName
+        The hostname or IP address of the ACE integration server
+
+    .PARAMETER port
+        The HTTPS port of the ACE httplistener
+
+    .NOTES
+        Version:        1.0
+        Author:         Matthias Blomme
+        Creation Date:  2022-12-29
+        Purpose/Change: Initial script development
+
+    .EXAMPLE
+        Check-httpsHealth -hostName "localhost" -port 7843
+    #>
+
+    param (
+        [Parameter(Mandatory=$True, Position=0)][String]$hostName,
+        [Parameter(Mandatory=$True, Position=1)][String]$port
+    )
+    Begin{}
+
+    Process{
+
+        $code= @"
+        using System.Net;
+        using System.Security.Cryptography.X509Certificates;
+        public class TrustAllCertsPolicy : ICertificatePolicy {
+            public bool CheckValidationResult(ServicePoint srvPoint, X509Certificate certificate, WebRequest request, int certificateProblem) {
+                return true;
+            }
+        }
+"@
+        Add-Type -TypeDefinition $code -Language CSharp
+        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls12
+        $url = "https://" + $hostName + ":" + $port + "/httplistener/health"
+        $httpsResult = Invoke-RestMethod -Method 'Get' -Uri $url
+
+
+        if ($httpsResult.status -eq 'ok')
+        {
+            Write-host "Https call successful"
+        } else {
+            Write-host "Https call failed, check the httplistener"
+        }
+    }
+
+    End{
+    }
+}
 
 function Install-Scripts {
     <#
@@ -1446,176 +1583,4 @@ function Install-Scripts {
     end {
         Write-Host "All scripts have been successfully copied to $installDir"
     }
-}
-
-function Invoke-AceEnvSimulation {
-    <#
-.SYNOPSIS
-  Print-only simulation (by default) of persisting IBM ACE/MQ env vars into the Machine env.
-
-.DESCRIPTION
-  - Loads ACE via a single cmd.exe session so the 'set' sees the profile's changes:
-        call mqsiprofile.cmd & set
-  - Dumps ACE and Machine (System) envs.
-  - Simulation rules:
-      * SET-AS-IS → Names matching ^(MQ|WMQ|ACE|MQSI)_ are set as-is (Machine scope).
-      * MERGE     → For variables whose *value* contains ACE/MQ paths (PATH-like):
-                    - Keep ACE/MQ entries from ACE side.
-                    - Strip ACE/MQ entries from Machine side.
-                    - Put ACE first, then Machine leftovers.
-                    - De-dupe (case-insensitive), preserve order, join with ';'
-  - No changes are applied unless -PersistMachine is supplied. In apply mode, actions are shown and applied.
-
-.PARAMETER AceProfile
-  Full path to the ACE mqsiprofile.cmd to source.
-
-.PARAMETER PersistMachine
-  When present, actually writes the computed values to Machine scope
-  (requires admin permissions). Otherwise, print-only.
-
-.EXAMPLE
-  # print-only (default)
-  Invoke-AceEnvSimulation -AceProfile "C:\Program Files\IBM\ACE\12.0.12.17\server\bin\mqsiprofile.cmd"
-
-.EXAMPLE
-  # apply to Machine env
-  Invoke-AceEnvSimulation -AceProfile "C:\Program Files\IBM\ACE\12.0.12.17\server\bin\mqsiprofile.cmd" -PersistMachine
-#>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$AceProfile,
-
-        [switch]$PersistMachine
-    )
-
-    # ---------- Patterns ----------
-    $NameRegex  = '^(MQ|WMQ|ACE|MQSI)_'  # Name-matched => set as-is
-    # Value contains any ACE/MQ-ish path segment (ibm\ace, mqsi, websphere mq, wmq, mq)
-    $EntryRegex = '(?i)(^|[\\/])(?:ibm[\\/]+ace|mqsi|websphere[\\/]?mq|wmq|mq)([\\/]|$)'
-
-    # ---------- Helpers ----------
-    function Split-EnvEntries {
-        param([string]$value)
-        $out = @()
-        if ([string]::IsNullOrWhiteSpace($value)) { return $out }
-        foreach ($raw in ($value -split ';+')) {
-            if ($null -eq $raw) { continue }
-            $t = $raw.Trim(" `t`r`n`0;")
-            if ([string]::IsNullOrWhiteSpace($t)) { continue }
-            $out += $t
-        }
-        return $out
-    }
-
-    function Dedupe-PreserveOrder {
-        param([string[]]$entries)
-        $seen = @{}
-        $out  = @()
-        foreach ($e in $entries) {
-            if ([string]::IsNullOrWhiteSpace($e)) { continue }
-            $k = $e.ToLowerInvariant()
-            if (-not $seen.ContainsKey($k)) { $seen[$k] = $true; $out += $e }
-        }
-        return ,$out  # return as string[]
-    }
-
-    function Entries-MatchingPattern    { param([string[]]$entries,[string]$regex)  return @($entries | Where-Object { $_ -match $regex }) }
-    function Entries-NotMatchingPattern { param([string[]]$entries,[string]$regex)  return @($entries | Where-Object { $_ -notmatch $regex }) }
-
-    function Load-AceEnvFromProfile {
-        param([string]$ProfileCmd)
-        $ht = @{}
-        # single cmd.exe session so the 'set' reflects the profile's changes
-        $cmdLine = "call `"$ProfileCmd`" & set"
-        & cmd.exe /d /c $cmdLine 2>$null | ForEach-Object {
-            $line = $_
-            if ($null -ne $line) { $line = $line.Trim() }
-            if ([string]::IsNullOrWhiteSpace($line)) { return }
-            $parts = $line -split '=', 2
-            if ($parts.Count -ne 2) { return }
-            $name  = $parts[0].Trim(" `t`r`n`0") -replace "^\uFEFF","" -replace "^[\\]+",""
-            $value = $parts[1]
-            if ($name -ne '') { $ht[$name] = $value }
-        }
-        return $ht
-    }
-
-    function Load-MachineEnv {
-        $dict = [System.Environment]::GetEnvironmentVariables('Machine')
-        $ht = @{}
-        foreach ($k in $dict.Keys) { $ht[[string]$k] = [string]$dict[$k] }
-        return $ht
-    }
-
-    # ---------- Load both envs ----------
-    $sys = Load-MachineEnv
-    $ace = Load-AceEnvFromProfile -ProfileCmd $AceProfile
-
-    # ---------- Dumps ----------
-    Write-Host "=== Dump: ACE environment variables ==="
-    foreach ($k in $ace.Keys | Sort-Object) { Write-Host "$k=$($ace[$k])" }
-    Write-Host "=== End Dump (ACE) ===`n"
-
-    Write-Host "=== Dump: System environment variables (Machine scope) ==="
-    foreach ($k in $sys.Keys | Sort-Object) { Write-Host "$k=$($sys[$k])" }
-    Write-Host "=== End Dump (System) ===`n"
-
-    # ---------- Simulation ----------
-    $results = @()
-
-    # 1) Name-matched → SET-AS-IS
-    foreach ($pair in $ace.GetEnumerator() | Where-Object { $_.Key -match $NameRegex }) {
-        $results += [pscustomobject]@{ Action='SET-AS-IS'; Name=$pair.Key; Value=$pair.Value }
-    }
-
-    # 2) Value-matched → MERGE (ACE first)
-    foreach ($pair in $ace.GetEnumerator() | Where-Object { $_.Key -notmatch $NameRegex -and $_.Value -match $EntryRegex }) {
-        $n = $pair.Key
-
-        $aceEntries = Split-EnvEntries $pair.Value
-        $aceMatched = Entries-MatchingPattern -entries $aceEntries -regex $EntryRegex
-        if ($aceMatched.Count -eq 0) { continue }
-
-        $sysVal     = if ($sys.ContainsKey($n)) { $sys[$n] } else { '' }
-        $sysEntries = Split-EnvEntries $sysVal
-        $sysPruned  = Entries-NotMatchingPattern -entries $sysEntries -regex $EntryRegex
-
-        # Robust array concatenation → prevents missing ';' (e.g., LIB with 8.3 paths)
-        $concat      = @(@($aceMatched) + @($sysPruned))
-        $dedup       = @(Dedupe-PreserveOrder $concat)
-        $mergedValue = ($dedup -join ';')
-
-        $results += [pscustomobject]@{ Action='MERGE'; Name=$n; Value=$mergedValue }
-    }
-
-    # ---------- Output / Apply ----------
-    if (-not $PersistMachine) {
-        Write-Host '=== Simulation Results (no changes applied) ==='
-        foreach ($r in $results) {
-            if ($r.Action -eq 'SET-AS-IS') {
-                Write-Host ("[WOULD SET] {0}={1}" -f $r.Name, $r.Value)
-                # [System.Environment]::SetEnvironmentVariable($r.Name, $r.Value, 'Machine')
-            }
-            elseif ($r.Action -eq 'MERGE') {
-                Write-Host ("[WOULD MERGE] {0}={1}" -f $r.Name, $r.Value)
-                # [System.Environment]::SetEnvironmentVariable($r.Name, $r.Value, 'Machine')
-            }
-        }
-        Write-Host '=== End ==='
-        return
-    }
-
-    # Persist to Machine (requires admin)
-    Write-Host '=== APPLYING changes to Machine environment ==='
-    foreach ($r in $results) {
-        try {
-            Write-Host ("[APPLY] {0} {1}={2}" -f ($r.Action -eq 'MERGE' ? 'MERGE' : 'SET'), $r.Name, $r.Value)
-            [System.Environment]::SetEnvironmentVariable($r.Name, $r.Value, 'Machine')
-        }
-        catch {
-            Write-Warning "Failed to set $($r.Name): $($_.Exception.Message)"
-        }
-    }
-    Write-Host '=== Done applying changes ==='
 }
