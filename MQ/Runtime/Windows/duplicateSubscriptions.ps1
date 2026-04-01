@@ -1,3 +1,7 @@
+param(
+    [parameter(Mandatory=$true)][String]$queueManagerName
+)
+
 # Function to run MQSC commands and capture output
 function Run-MQSCCommand {
     param (
@@ -8,8 +12,6 @@ function Run-MQSCCommand {
     $output = echo $command | & "runmqsc" $queueManagerName
     return $output
 }
-
-$queueManagerName = "PSAAEDIMQTEST"
 
 # Step 1: Get subscription details (including SUB, TOPICSTR, DEST)
 $subOutput = Run-MQSCCommand -queueManagerName $queueManagerName -command "dis sub(*) topicstr dest"

@@ -1,5 +1,6 @@
-# Define the path to the directory
-$directoryPath = "D:\MQ\qmgrs\QMGR\queues"
+param(
+    [parameter(Mandatory=$true)][String]$directoryPath
+)
 
 # Get the current directory
 $currentDirectory = Get-Location

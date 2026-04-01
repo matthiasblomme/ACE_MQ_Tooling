@@ -1,3 +1,7 @@
+param(
+    [parameter(Mandatory=$true)][String]$queueManagerName
+)
+
 # Function to run MQSC commands and capture output
 function Run-MQSCCommand {
     param (
@@ -9,9 +13,6 @@ function Run-MQSCCommand {
     $output = echo $command | & "runmqsc" $queueManagerName
     return $output
 }
-
-# Define your queue manager name here
-$queueManagerName = "QMGR"
 
 # Step 1: Get the list of all queues using the 'dis ql(*)' command
 $mqOutput = Run-MQSCCommand -queueManagerName $queueManagerName -command "dis ql(*)"

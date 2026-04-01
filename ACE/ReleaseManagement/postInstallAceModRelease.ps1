@@ -24,6 +24,12 @@
 .PARAMETER nodeName
     The name of the integration node that is running and needs to switch to the latest mod release
 
+.PARAMETER scriptPath
+    Path to a script file that hardcodes the ACE version and needs to be updated (e.g. a backup .cmd)
+
+.PARAMETER driverName
+    Name of the ODBC data source to update with the new ACE version driver
+
 .OUTPUTS
     Logging is written to the console
 
@@ -34,7 +40,7 @@
     Purpose/Change: Initial script development
 
 .EXAMPLE
-    .\postInstallAceModRelease.ps1 -fixVersion 12.0.7.0 -oldVersion 12.0.5.0 -installBasePath "C:\Program Files\ibm\ACE" -nodeName TEST -hostName localhost
+    .\postInstallAceModRelease.ps1 -fixVersion 12.0.7.0 -oldVersion 12.0.5.0 -installBasePath "C:\Program Files\ibm\ACE" -nodeName TEST -hostName localhost -scriptPath "C:\scripts\backup.cmd" -driverName DRIVER1
 #>
 
 #-------------------------------------------------[Parameters]------------------------------------------------
@@ -43,7 +49,9 @@ param(
     [parameter(Mandatory=$true)][String]$oldVersion,
     [parameter(Mandatory=$true)][String]$installBasePath,
     [parameter(Mandatory=$true)][String]$nodeName,
-    [parameter(Mandatory=$false)][String]$hostName
+    [parameter(Mandatory=$false)][String]$hostName,
+    [parameter(Mandatory=$false)][String]$scriptPath,
+    [parameter(Mandatory=$false)][String]$driverName
 )
 
 #-----------------------------------------------[Initialisations]----------------------------------------------
@@ -58,11 +66,16 @@ $sScriptVersion = "1.0"
 
 #-------------------------------------------------[Execution]--------------------------------------------------
 Write-Log("Begin postInstallAceModRelease...")
-Update-Script -scriptPath C:\temp\backup.cmd -fixVersion $fixVersion -oldVersion $oldVersion
+
+if ($scriptPath -ne '') {
+    Update-Script -scriptPath $scriptPath -fixVersion $fixVersion -oldVersion $oldVersion
+}
 
 Stop-Ace -oldVersion $oldVersion -installBasePath $installBasePath -nodeName $nodeName
 
-Update-ODBC -fixVersion $fixVersion -driverName DRIVER1
+if ($driverName -ne '') {
+    Update-ODBC -fixVersion $fixVersion -driverName $driverName
+}
 
 Start-Sleep -Seconds 5
 
