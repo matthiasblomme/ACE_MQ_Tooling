@@ -12,9 +12,13 @@
         5. Installing java.security
         6. Installing shared-classes
         7. Creating a custom event view
+        8. Persisting ACE/MQ environment variables to Machine scope
 
 .PARAMETER fixVersion
     The version of the latest mod release that has been installed before running this script
+
+.PARAMETER oldVersion
+    The version of the previously installed mod release (used to clean old env entries)
 
 .PARAMETER installBasePath
     The base binary installation path for aCE, the default windows installation path is C:\Program Files\IBM\ACE\
@@ -35,12 +39,13 @@
     Purpose/Change: Initial script development
 
 .EXAMPLE
-    .\installAceModRelease.ps1 -fixVersion 12.0.7.0 -installBasePath "C:\Program Files\ibm\ACE" -logBasePath "C:\temp" -runtimeBasePath "C:\ProgramData\IBM\MQSI"
+    .\installAceModRelease.ps1 -fixVersion 12.0.7.0 -oldVersion 12.0.6.0 -installBasePath "C:\Program Files\ibm\ACE" -logBasePath "C:\temp" -runtimeBasePath "C:\ProgramData\IBM\MQSI"
 #>
 
 #-------------------------------------------------[Parameters]------------------------------------------------
 param(
     [parameter(Mandatory=$true)][String]$fixVersion,
+    [parameter(Mandatory=$true)][String]$oldVersion,
     [parameter(Mandatory=$true)][String]$installBasePath,
     [parameter(Mandatory=$true)][String]$logBasePath,
     [parameter(Mandatory=$true)][String]$runtimeBasePath
@@ -48,6 +53,7 @@ param(
 #-----------------------------------------------[Initialisations]----------------------------------------------
 #Dot Source required Function Libraries
 . "./AceLibrary.ps1"
+. "./persistAceMqEnv.ps1"
 
 #------------------------------------------------[Declarations]------------------------------------------------
 #Script Version
@@ -57,7 +63,7 @@ $sScriptVersion = "1.0"
 
 #-------------------------------------------------[Execution]--------------------------------------------------
 Write-Log("Begin installAceModRelease ...")
-#run from C:\Users\ADM-BLMM_M\modrelease
+
 $aceModDir = "12.0-ACE-WINX64-$fixVersion"
 $installDir = "$installBasePath\$fixVersion"
 
@@ -77,10 +83,7 @@ Install-Scripts -installDir "$installDir\server\bin\"
 
 Install-JavaSecurity -installDir $installDir
 
-# Print
-Invoke-AceEnvSimulation -AceProfile "$installDir\server\bin\mqsiprofile.cmd"
-# Execute
-Invoke-AceEnvSimulation -AceProfile "$installDir\server\bin\mqsiprofile.cmd" -PersistMachine
+Persist-AceMqEnv -AceProfile "$installDir\server\bin\mqsiprofile.cmd" -OldVersion $oldVersion -Apply
 
 
 Write-Log("End installAceModRelease.")

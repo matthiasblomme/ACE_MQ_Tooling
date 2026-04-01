@@ -1,5 +1,6 @@
-# Define the output directory
-$outputDirectory = "C:\Matthias\temp\backout"  # Change this to your desired directory
+param(
+    [parameter(Mandatory=$true)][String]$outputDirectory
+)
 
 # Define the exception list where you specify original queues for specific backout queues
 $exceptionList = @{
