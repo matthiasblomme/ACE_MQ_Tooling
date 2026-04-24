@@ -495,8 +495,8 @@ function Set-Mqsimode {
 
             Remove-Item -Path $setModeScriptPath -Force
 
-            $selection = $output | Select-String "BIP1805I"
-            if ($selection -like "*BIP1805I*") {
+            $selection = $output | Select-String "BIP1802I"
+            if ($selection -like "*BIP1802I*") {
                 Write-Log "mode $mode set."
             } else {
                 Write-Log "Failed to set mode $mode, please check."
