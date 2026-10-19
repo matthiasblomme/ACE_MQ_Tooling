@@ -1,0 +1,5 @@
+# Generic-rule false positives for the public-repo-scrub commit gate (tracked, public).
+# Vendor BouncyCastle jars: manifest package names read as hosts, digest keys as high-entropy.
+path:ACE/ReleaseManagement/shared-classes/*.jar
+# Truncated jar in history (no central directory); its 22 entries were inflated and checked by hand.
+path:ACE/ReleaseManagement/udn/toolkit/PGPSupportPac.jar
